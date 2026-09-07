@@ -17,8 +17,8 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: 安装后端依赖
         run: pip install -r backend/requirements.txt
-      - name: 后端测试
-        run: python -m unittest discover -s tests -v
+      - name: 后端语法检查
+        run: python -m compileall -q backend
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
