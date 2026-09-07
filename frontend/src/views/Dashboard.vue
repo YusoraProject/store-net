@@ -17,10 +17,12 @@
         <el-button type="text" @click="logout">退出登录</el-button>
       </div>
     </header>
-    <div class="mobile-nav">
+    <div class="mobile-nav" role="navigation" aria-label="主导航">
       <el-button
         v-for="item in menus"
         :key="item.key"
+        :type="active === item.key ? 'primary' : 'default'"
+        :aria-current="active === item.key ? 'page' : null"
         size="mini"
         @click="active = item.key"
         >{{ item.label }}</el-button
@@ -144,13 +146,17 @@
                 v-if="current.segments && current.segments.length"
                 :data="current.segments"
               >
-                <el-table-column prop="area_name" label="停留区域" />
-                <el-table-column label="进入时间"
+                <el-table-column
+                  min-width="120"
+                  prop="area_name"
+                  label="停留区域"
+                />
+                <el-table-column min-width="120" label="进入时间"
                   ><template slot-scope="x">{{
                     format(x.row.started_at)
                   }}</template></el-table-column
                 >
-                <el-table-column label="离开时间"
+                <el-table-column min-width="120" label="离开时间"
                   ><template slot-scope="x">{{
                     x.row.ended_at ? format(x.row.ended_at) : '计时中'
                   }}</template></el-table-column
@@ -298,25 +304,34 @@
                 >
               </div>
               <el-table :data="members"
-                ><el-table-column prop="name" label="姓名" /><el-table-column
+                ><el-table-column
+                  min-width="120"
+                  prop="name"
+                  label="姓名"
+                /><el-table-column
+                  min-width="120"
                   prop="username"
                   label="用户名"
-                /><el-table-column label="身份"
+                /><el-table-column min-width="120" label="身份"
                   ><template slot-scope="x">{{
                     label(x.row.store_role)
                   }}</template></el-table-column
-                ><el-table-column label="本金"
+                ><el-table-column min-width="120" label="本金"
                   ><template slot-scope="x"
                     >¥{{ x.row.paid.toFixed(2) }}</template
                   ></el-table-column
-                ><el-table-column label="赠金"
+                ><el-table-column min-width="120" label="赠金"
                   ><template slot-scope="x"
                     >¥{{ x.row.bonus.toFixed(2) }}</template
                   ></el-table-column
                 ><el-table-column
+                  min-width="120"
                   prop="times_count"
                   label="次卡"
-                /><el-table-column label="操作" width="190"
+                /><el-table-column
+                  min-width="210"
+                  class-name="table-actions"
+                  label="操作"
                   ><template slot-scope="x"
                     ><el-button size="mini" @click="adjust(x.row)"
                       >调整权益</el-button
@@ -347,24 +362,29 @@
             <el-tab-pane label="消费记录" name="consumptions"
               ><el-table :data="consumptions"
                 ><el-table-column
+                  min-width="120"
                   prop="user_id"
                   label="用户编号"
-                /><el-table-column label="开始"
+                /><el-table-column min-width="120" label="开始"
                   ><template slot-scope="x">{{
                     format(x.row.started_at)
                   }}</template></el-table-column
                 ><el-table-column
+                  min-width="120"
                   prop="duration_minutes"
                   label="分钟"
-                /><el-table-column label="费用"
+                /><el-table-column min-width="120" label="费用"
                   ><template slot-scope="x"
                     >¥{{ x.row.amount_due.toFixed(2) }}</template
                   ></el-table-column
-                ><el-table-column label="状态"
+                ><el-table-column min-width="120" label="状态"
                   ><template slot-scope="x">{{
                     label(x.row.status)
                   }}</template></el-table-column
-                ><el-table-column label="操作"
+                ><el-table-column
+                  min-width="210"
+                  class-name="table-actions"
+                  label="操作"
                   ><template slot-scope="x"
                     ><el-button
                       v-if="x.row.status === 'open'"
@@ -385,18 +405,25 @@
             <el-tab-pane label="资产流水" name="ledgers"
               ><el-table :data="ledgers"
                 ><el-table-column
+                  min-width="120"
                   prop="user_id"
-                  label="用户编号" /><el-table-column label="类型"
+                  label="用户编号" /><el-table-column
+                  min-width="120"
+                  label="类型"
                   ><template slot-scope="x">{{
                     label(x.row.action)
                   }}</template></el-table-column
                 ><el-table-column
+                  min-width="120"
                   prop="paid_delta"
                   label="本金变化" /><el-table-column
+                  min-width="120"
                   prop="bonus_delta"
                   label="赠金变化" /><el-table-column
+                  min-width="120"
                   prop="times_delta"
                   label="次卡变化" /><el-table-column
+                  min-width="120"
                   prop="remark"
                   label="原因" /></el-table
             ></el-tab-pane>
@@ -405,19 +432,30 @@
         <section v-if="active === 'users'">
           <h2>用户管理</h2>
           <el-table :data="users"
-            ><el-table-column prop="username" label="用户名" /><el-table-column
+            ><el-table-column
+              min-width="120"
+              prop="username"
+              label="用户名"
+            /><el-table-column
+              min-width="120"
               prop="name"
               label="姓名"
-            /><el-table-column prop="email" label="邮箱" /><el-table-column
-              label="角色"
+            /><el-table-column
+              min-width="120"
+              prop="email"
+              label="邮箱"
+            /><el-table-column min-width="120" label="角色"
               ><template slot-scope="x">{{
                 label(x.row.role_name)
               }}</template></el-table-column
-            ><el-table-column label="状态"
+            ><el-table-column min-width="120" label="状态"
               ><template slot-scope="x">{{
                 x.row.is_active ? '已启用' : '已停用'
               }}</template></el-table-column
-            ><el-table-column label="操作"
+            ><el-table-column
+              min-width="210"
+              class-name="table-actions"
+              label="操作"
               ><template slot-scope="x"
                 ><el-button size="mini" @click="editUser(x.row)"
                   >角色/状态</el-button
@@ -432,19 +470,22 @@
             <el-button type="primary" @click="createRole">新建角色</el-button>
           </div>
           <el-table :data="roles"
-            ><el-table-column label="名称"
+            ><el-table-column min-width="120" label="名称"
               ><template slot-scope="x">{{
                 label(x.row.name)
               }}</template></el-table-column
-            ><el-table-column label="说明"
+            ><el-table-column min-width="120" label="说明"
               ><template slot-scope="x">{{
                 label(x.row.description)
               }}</template></el-table-column
-            ><el-table-column label="权限"
+            ><el-table-column min-width="120" label="权限"
               ><template slot-scope="x">{{
                 x.row.permissions.map(label).join('、')
               }}</template></el-table-column
-            ><el-table-column label="操作"
+            ><el-table-column
+              min-width="210"
+              class-name="table-actions"
+              label="操作"
               ><template slot-scope="x"
                 ><el-button
                   size="mini"

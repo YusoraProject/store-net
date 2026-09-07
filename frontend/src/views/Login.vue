@@ -238,6 +238,9 @@ export default {
 }
 
 @media (max-width: 960px) {
+  .floating-orb {
+    display: none;
+  }
   .login-shell {
     display: flex;
     flex-direction: column;

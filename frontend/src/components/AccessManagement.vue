@@ -8,80 +8,137 @@
     </div>
     <el-alert
       :title="error || status.message || '正在加载门锁配置'"
-      :type="error ? 'error' : 'warning'"
+      :type="error ? 'error' : 'info'"
       :closable="false"
       show-icon
     />
     <template v-if="status.initialized">
       <el-tabs v-model="tab">
         <el-tab-pane label="通通锁授权" name="authorization">
-          <p>
-            状态：{{
-              status.credential_configured ? '已配置（密钥不回显）' : '未配置'
-            }}。填写通通锁 App 账号，不是开放平台登录账号。
-          </p>
-          <el-alert
-            title="需要 HTTPS 和服务器端启用真实调用。账号密码仅用于本次授权，不保存；系统会提前续期，续期结果不明时需要人工重新授权。"
-            type="warning"
-            :closable="false"
-          />
-          <p v-if="status.credential_configured">
-            续期状态：{{ refreshLabel(status.refresh_status) }}；授权有效至：{{
-              status.expires_at
-                ? new Date(status.expires_at * 1000).toLocaleString()
-                : '暂不可用'
-            }}。
-          </p>
+          <section class="authorization-summary" aria-label="通通锁授权状态">
+            <div class="authorization-heading">
+              <div>
+                <h3>连接通通锁</h3>
+                <p>连接门店账号后，即可选择门锁并配置区域发码。</p>
+              </div>
+              <span
+                class="authorization-badge"
+                :class="{ configured: status.credential_configured }"
+              >
+                <span class="authorization-dot" aria-hidden="true"></span>
+                {{ status.credential_configured ? '已配置' : '待授权' }}
+              </span>
+            </div>
+            <div
+              v-if="status.credential_configured"
+              class="authorization-details"
+            >
+              <div>
+                <span>续期状态</span
+                ><strong>{{ refreshLabel(status.refresh_status) }}</strong>
+              </div>
+              <div>
+                <span>授权有效至</span
+                ><strong>{{
+                  status.expires_at
+                    ? new Date(status.expires_at * 1000).toLocaleString()
+                    : '暂不可用'
+                }}</strong>
+              </div>
+              <el-button
+                size="small"
+                :loading="renewing"
+                @click="refreshAuthorization"
+                >检查授权续期</el-button
+              >
+            </div>
+            <div v-else class="authorization-guide">
+              <strong>还没有通通锁 App 账号？</strong>
+              <p>
+                先注册 App 账号，并在 App
+                中添加门锁或获得门锁授权，再回到这里连接。仅有开放平台应用编号和密钥，暂时无法完成授权测试。
+              </p>
+            </div>
+          </section>
           <el-alert
             v-if="status.refresh_error"
             :title="status.refresh_error"
             type="error"
             :closable="false"
+            show-icon
           />
-          <el-button
-            v-if="status.credential_configured"
-            size="small"
-            :loading="renewing"
-            @click="refreshAuthorization"
-          >
-            检查授权续期
-          </el-button>
           <el-form
-            label-width="130px"
-            style="max-width: 520px; margin-top: 16px"
+            class="authorization-form"
+            label-position="top"
+            @submit.native.prevent="authorizeLock"
           >
-            <el-form-item label="服务区域"
-              ><el-select v-model="auth.region"
-                ><el-option label="中国" value="cn" /><el-option
-                  label="欧洲"
-                  value="eu" /></el-select
-            ></el-form-item>
-            <el-form-item label="应用编号"
-              ><el-input v-model="auth.client_id" autocomplete="off"
-            /></el-form-item>
-            <el-form-item label="应用密钥"
-              ><el-input
-                v-model="auth.client_secret"
-                type="password"
-                autocomplete="new-password"
-            /></el-form-item>
-            <el-form-item label="通通锁账号"
-              ><el-input v-model="auth.username" autocomplete="off"
-            /></el-form-item>
-            <el-form-item label="通通锁密码"
-              ><el-input
-                v-model="auth.password"
-                type="password"
-                autocomplete="new-password"
-            /></el-form-item>
-            <el-form-item
-              ><el-button
-                type="primary"
-                :loading="saving"
-                @click="authorizeLock"
+            <div class="authorization-columns">
+              <section class="authorization-group">
+                <h4><span>1</span>开放平台应用</h4>
+                <p class="authorization-help">
+                  在通通锁开放平台的应用详情中获取。
+                </p>
+                <el-form-item label="服务区域">
+                  <el-select v-model="auth.region"
+                    ><el-option label="中国" value="cn" /><el-option
+                      label="欧洲"
+                      value="eu"
+                  /></el-select>
+                </el-form-item>
+                <el-form-item label="应用编号（client_id）">
+                  <el-input
+                    v-model="auth.client_id"
+                    placeholder="请输入应用编号"
+                    autocomplete="off"
+                  />
+                </el-form-item>
+                <el-form-item label="应用密钥（client_secret）">
+                  <el-input
+                    v-model="auth.client_secret"
+                    type="password"
+                    placeholder="请输入应用密钥"
+                    autocomplete="new-password"
+                  />
+                </el-form-item>
+              </section>
+              <section class="authorization-group">
+                <h4><span>2</span>通通锁 App 账号</h4>
+                <p class="authorization-help">
+                  填写手机 App 的登录账号，不是开放平台账号。
+                </p>
+                <el-form-item label="通通锁账号">
+                  <el-input
+                    v-model="auth.username"
+                    placeholder="请输入通通锁 App 账号"
+                    autocomplete="off"
+                  />
+                </el-form-item>
+                <el-form-item label="通通锁密码">
+                  <el-input
+                    v-model="auth.password"
+                    type="password"
+                    placeholder="请输入 App 登录密码"
+                    autocomplete="new-password"
+                  />
+                </el-form-item>
+                <p class="authorization-privacy">
+                  <i class="el-icon-lock" aria-hidden="true"></i
+                  >账号密码仅用于本次授权；应用密钥和令牌加密保存，不回显。
+                </p>
+              </section>
+            </div>
+            <div class="authorization-footer">
+              <div>
+                <strong>连接前准备</strong>
+                <p>
+                  需通过 HTTPS
+                  访问，并在服务器启用通通锁连接。授权成功后系统会提前续期，异常时请根据提示重新授权。
+                </p>
+              </div>
+              <el-button type="primary" native-type="submit" :loading="saving"
                 >授权并测试连接</el-button
-              ></el-form-item
-            >
+              >
+            </div>
           </el-form>
         </el-tab-pane>
         <el-tab-pane label="计费区域" name="areas">
@@ -89,18 +146,21 @@
             >新增区域</el-button
           >
           <el-table :data="areas" v-loading="loading">
-            <el-table-column prop="name" label="区域" />
-            <el-table-column label="状态"
+            <el-table-column min-width="120" prop="name" label="区域" />
+            <el-table-column min-width="120" label="状态"
               ><template slot-scope="x">{{
                 x.row.enabled ? '启用' : '停用'
               }}</template></el-table-column
             >
-            <el-table-column label="门锁"
+            <el-table-column min-width="120" label="门锁"
               ><template slot-scope="x">{{
                 x.row.lock_name || '尚未绑定'
               }}</template></el-table-column
             >
-            <el-table-column label="操作"
+            <el-table-column
+              min-width="280"
+              class-name="table-actions"
+              label="操作"
               ><template slot-scope="x"
                 ><el-button size="mini" @click="edit(x.row)">编辑</el-button
                 ><el-button size="mini" @click="bind(x.row)">绑定门锁</el-button
@@ -139,10 +199,18 @@
             /></el-select>
           </div>
           <el-table :data="records.items">
-            <el-table-column prop="area_id" label="区域编号" />
-            <el-table-column prop="operator_id" label="操作人编号" />
-            <el-table-column prop="recipient_id" label="领取人编号" />
-            <el-table-column label="来源"
+            <el-table-column min-width="120" prop="area_id" label="区域编号" />
+            <el-table-column
+              min-width="120"
+              prop="operator_id"
+              label="操作人编号"
+            />
+            <el-table-column
+              min-width="120"
+              prop="recipient_id"
+              label="领取人编号"
+            />
+            <el-table-column min-width="120" label="来源"
               ><template slot-scope="x">{{
                 x.row.source === 'manual'
                   ? '手动创建'
@@ -151,13 +219,23 @@
                   : '上机自动创建'
               }}</template></el-table-column
             >
-            <el-table-column label="结果"
+            <el-table-column min-width="120" label="结果"
               ><template slot-scope="x">{{
                 states[x.row.status] || '未知状态'
               }}</template></el-table-column
             >
-            <el-table-column prop="created_at" label="创建时间" />
-            <el-table-column prop="error" label="说明" /><el-table-column
+            <el-table-column
+              min-width="120"
+              prop="created_at"
+              label="创建时间"
+            />
+            <el-table-column
+              min-width="120"
+              prop="error"
+              label="说明"
+            /><el-table-column
+              min-width="360"
+              class-name="table-actions"
               label="密码操作"
               ><template slot-scope="x"
                 ><el-button
@@ -336,6 +414,15 @@ export default {
       }
     },
     async authorizeLock() {
+      if (!this.auth.client_id.trim() || !this.auth.client_secret.trim()) {
+        return this.$message.warning('请先填写开放平台应用编号和应用密钥')
+      }
+      if (!this.auth.username.trim() || !this.auth.password) {
+        return this.$message.warning('请填写通通锁 App 账号和密码后再测试连接')
+      }
+      if (window.location.protocol !== 'https:') {
+        return this.$message.warning('请通过 HTTPS 打开页面后再提交门锁授权')
+      }
       this.saving = true
       try {
         await this.$api.post(
@@ -535,5 +622,211 @@ export default {
   gap: 12px;
   flex-wrap: wrap;
   margin: 12px 0;
+}
+.authorization-summary {
+  margin: 12px 0 24px;
+  padding: 22px 24px;
+  border: 1px solid #dce5ef;
+  border-radius: 12px;
+  background: #f7faff;
+}
+.authorization-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.authorization-heading h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  color: #24354b;
+}
+.authorization-heading p,
+.authorization-guide p {
+  margin: 0;
+  color: #606f82;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.authorization-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-radius: 20px;
+  background: #fff1d9;
+  color: #8c5b0c;
+  font-size: 12px;
+  font-weight: 600;
+}
+.authorization-badge.configured {
+  background: #e3f4eb;
+  color: #267448;
+}
+.authorization-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.authorization-guide {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #e0e8f2;
+}
+.authorization-guide strong {
+  display: block;
+  margin-bottom: 5px;
+  color: #384c65;
+  font-size: 13px;
+}
+.authorization-details {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin-top: 20px;
+}
+.authorization-details div {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.authorization-details span {
+  color: #68788b;
+}
+.authorization-details strong {
+  color: #34465e;
+  font-weight: 500;
+}
+.authorization-form {
+  margin-top: 20px;
+}
+.authorization-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 24px;
+}
+.authorization-group {
+  min-width: 0;
+  padding: 22px 24px 6px;
+  border: 1px solid #e6eaf0;
+  border-radius: 12px;
+}
+.authorization-group h4 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  color: #2c3e56;
+  font-size: 15px;
+}
+.authorization-group h4 span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: #edf3ff;
+  color: #4677c8;
+  font-size: 12px;
+}
+.authorization-help {
+  min-height: 40px;
+  margin: 0 0 14px;
+  color: #68788b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.authorization-group .el-select {
+  width: 100%;
+}
+.authorization-group ::v-deep .el-form-item__label {
+  padding-bottom: 6px;
+  line-height: 22px;
+  color: #45556b;
+}
+.authorization-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  margin: 0 0 16px;
+  background: #f7f9fb;
+  border-radius: 8px;
+  color: #68788b;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.authorization-privacy i {
+  margin-top: 4px;
+}
+.authorization-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  margin-top: 24px;
+  padding: 18px 0 4px;
+  border-top: 1px solid #e8edf3;
+}
+.authorization-footer strong {
+  color: #45556b;
+  font-size: 13px;
+}
+.authorization-footer p {
+  max-width: 640px;
+  margin: 6px 0 0;
+  color: #68788b;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.authorization-footer .el-button {
+  flex-shrink: 0;
+}
+.dark-mode .authorization-summary,
+.dark-mode .authorization-privacy {
+  background: #202d40;
+}
+.dark-mode .authorization-summary,
+.dark-mode .authorization-group,
+.dark-mode .authorization-guide,
+.dark-mode .authorization-footer {
+  border-color: #38465a;
+}
+.dark-mode .authorization-heading h3,
+.dark-mode .authorization-group h4,
+.dark-mode .authorization-guide strong,
+.dark-mode .authorization-details strong,
+.dark-mode .authorization-footer strong {
+  color: #e2e8f0;
+}
+.dark-mode .authorization-heading p,
+.dark-mode .authorization-guide p,
+.dark-mode .authorization-help,
+.dark-mode .authorization-privacy,
+.dark-mode .authorization-details span,
+.dark-mode .authorization-footer p {
+  color: #b5c1d2;
+}
+@media (max-width: 760px) {
+  .authorization-columns {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .authorization-summary,
+  .authorization-group {
+    padding: 18px 16px;
+  }
+  .authorization-help {
+    min-height: 0;
+  }
+  .authorization-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
 }
 </style>

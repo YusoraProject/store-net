@@ -222,3 +222,163 @@ body {
     display: none;
   }
 }
+
+/* 操作列预留完整按钮宽度，窄屏只滚动表格，不撑开整页。 */
+.shell .el-table .table-actions .cell {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  white-space: nowrap;
+}
+.shell .el-table .table-actions .el-button {
+  flex: 0 0 auto;
+  margin: 0;
+}
+.shell .content,
+.shell .content section,
+.shell .grid > *,
+.shell .el-tabs {
+  min-width: 0;
+}
+.shell .el-table {
+  max-width: 100%;
+}
+.el-message-box {
+  max-width: calc(100vw - 32px);
+}
+.el-message {
+  min-width: 0;
+  max-width: calc(100vw - 24px);
+}
+.el-message__content,
+.el-message-box__message {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .shell .topbar {
+    height: auto;
+    min-height: 64px;
+    padding: 10px 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .shell .mobile-logo {
+    font-size: 14px;
+  }
+  .shell .header-user {
+    min-width: 0;
+    margin-left: auto;
+  }
+  .shell .header-user .el-avatar {
+    display: none;
+  }
+  .shell .header-user .name {
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+  }
+  .shell .mobile-nav {
+    gap: 8px;
+    padding: 8px 12px;
+  }
+  .shell .mobile-nav .el-button {
+    flex: 0 0 auto;
+    min-height: 40px;
+    margin: 0;
+    padding: 10px 14px;
+  }
+  .shell .content {
+    padding: 12px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  }
+  .shell .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .shell .el-card__body,
+  .shell .el-card__header {
+    padding: 16px;
+  }
+  .shell .hero {
+    padding: 18px;
+  }
+  .shell h2 {
+    font-size: 21px;
+    overflow-wrap: anywhere;
+  }
+  .shell p {
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+  }
+  .shell .toolbar > .el-input,
+  .shell .toolbar > .el-select {
+    width: 100%;
+  }
+  .shell .el-card__body > .el-select {
+    display: block;
+    width: 100%;
+    margin-bottom: 12px;
+  }
+  .shell .access-filters > .el-select {
+    width: 100%;
+  }
+  .shell .el-form-item__label,
+  .el-dialog .el-form-item__label {
+    float: none;
+    display: block;
+    width: auto !important;
+    text-align: left;
+    line-height: 24px;
+    padding: 0 0 6px;
+  }
+  .shell .el-form-item__content,
+  .el-dialog .el-form-item__content {
+    margin-left: 0 !important;
+  }
+  .shell .el-form .el-input-number,
+  .el-dialog .el-input-number {
+    width: 100%;
+  }
+  .shell .el-button--mini,
+  .shell .el-button--small {
+    min-height: 36px;
+  }
+  .shell .el-table .cell {
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+  .shell .el-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 12px 0;
+  }
+  .el-dialog {
+    max-width: calc(100vw - 24px);
+    margin-top: 6vh !important;
+  }
+  .el-dialog__body {
+    padding: 16px;
+  }
+  .el-dialog__footer {
+    padding: 12px 16px 20px;
+  }
+  .el-message-box__btns {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .el-message-box__btns .el-button {
+    margin: 0;
+    min-height: 40px;
+  }
+  .shell .chart-column {
+    font-size: 10px;
+  }
+  .shell .chart-column > span {
+    white-space: nowrap;
+  }
+}
