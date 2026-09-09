@@ -36,6 +36,10 @@ def start_worker():
     def run():
         while not stop.is_set():
             try:
+                from .bookings import expire_sessions
+                with SessionLocal() as db:
+                    if expire_sessions(db):
+                        db.commit()
                 if os.getenv("TTLOCK_REAL_ENABLED", "false").lower() == "true":
                     refresh_due(SessionLocal)
                 recover_once()

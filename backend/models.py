@@ -122,3 +122,69 @@ class Consumption(Base):
     operator_id = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class VenueBooking(Base):
+    __tablename__ = "venue_bookings"
+    __table_args__ = (UniqueConstraint("store_id", "request_key", name="uq_booking_request"),)
+    id = Column(Integer, primary_key=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False, index=True)
+    area_id = Column(Integer)  # NULL 表示整店，包含后续新增区域。
+    customer_name = Column(String(120), nullable=False)
+    contact = Column(String(120), default="", nullable=False)
+    started_at = Column(DateTime, nullable=False)
+    ended_at = Column(DateTime, nullable=False)
+    amount_cents = Column(Integer, nullable=False)
+    paid_cents = Column(Integer, default=0, nullable=False)
+    refunded_cents = Column(Integer, default=0, nullable=False)
+    status = Column(String(20), default="reserved", nullable=False)
+    remark = Column(String(500), default="", nullable=False)
+    request_key = Column(String(80), nullable=False)
+    operator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    paid_by = Column(Integer, ForeignKey("users.id"))
+    cancelled_by = Column(Integer, ForeignKey("users.id"))
+    paid_at = Column(DateTime)
+    cancelled_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class BookingSettings(Base):
+    __tablename__ = "booking_settings"
+    store_id = Column(Integer, ForeignKey("stores.id"), primary_key=True)
+    deposit_percent = Column(Integer, default=30, nullable=False)
+    slots_json = Column(Text, default="[]", nullable=False)
+    updated_by = Column(Integer, ForeignKey("users.id"))
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class BookingDetails(Base):
+    __tablename__ = "booking_details"
+    booking_id = Column(Integer, ForeignKey("venue_bookings.id"), primary_key=True)
+    host_user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    source = Column(String(20), default="manual", nullable=False)
+    slot_id = Column(String(64))
+    slot_name = Column(String(60))
+    deposit_percent = Column(Integer, nullable=False)
+    deposit_cents = Column(Integer, nullable=False)
+    deposit_paid_at = Column(DateTime)
+    balance_paid_cents = Column(Integer, default=0, nullable=False)
+    hold_until = Column(DateTime)
+
+
+class BookingInvitation(Base):
+    __tablename__ = "booking_invitations"
+    __table_args__ = (UniqueConstraint("booking_id", "user_id", name="uq_booking_invitation"),)
+    id = Column(Integer, primary_key=True)
+    booking_id = Column(Integer, ForeignKey("venue_bookings.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    invited_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    status = Column(String(20), default="pending", nullable=False)
+    responded_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class BookingSession(Base):
+    __tablename__ = "booking_sessions"
+    consumption_id = Column(Integer, ForeignKey("consumptions.id"), primary_key=True)
+    booking_id = Column(Integer, ForeignKey("venue_bookings.id"), nullable=False, index=True)
+    ends_at = Column(DateTime, nullable=False)

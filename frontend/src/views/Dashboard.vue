@@ -25,7 +25,9 @@
         :aria-current="active === item.key ? 'page' : null"
         size="mini"
         @click="active = item.key"
-        >{{ item.label }}</el-button
+        ><i :class="item.icon" aria-hidden="true" /><span>{{
+          item.label
+        }}</span></el-button
       >
     </div>
     <div class="layout">
@@ -39,17 +41,22 @@
             ><template slot="title"><i class="el-icon-s-home" />常用</template
             ><el-menu-item
               v-for="item in menus.filter((x) =>
-                ['home', 'profile', 'stores'].includes(x.key)
+                ['home', 'profile', 'stores', 'bookings', 'venue'].includes(
+                  x.key
+                )
               )"
               :key="item.key"
               :index="item.key"
               ><i :class="item.icon" />{{ item.label }}</el-menu-item
             ></el-submenu
-          ><el-submenu v-if="menus.length > 3" index="management"
+          ><el-submenu v-if="menus.length > 5" index="management"
             ><template slot="title"><i class="el-icon-setting" />管理</template
             ><el-menu-item
               v-for="item in menus.filter(
-                (x) => !['home', 'profile', 'stores'].includes(x.key)
+                (x) =>
+                  !['home', 'profile', 'stores', 'bookings', 'venue'].includes(
+                    x.key
+                  )
               )"
               :key="item.key"
               :index="item.key"
@@ -63,6 +70,11 @@
       </aside>
       <main class="content">
         <registration-stats v-if="active === 'stats' && can('users.manage')" />
+        <venue-status
+          v-if="active === 'venue'"
+          :stores="stores"
+          :initial-store-id="selectedStore"
+        />
         <section v-if="active === 'home'">
           <div class="hero">
             <h2>你好，{{ label(profile.name) }}</h2>
@@ -88,7 +100,15 @@
           <div class="grid">
             <el-card class="panel"
               ><div class="muted">当前状态</div>
-              <div class="metric">{{ current ? '计时中' : '未上机' }}</div>
+              <div class="metric">
+                {{
+                  current
+                    ? current.booking_id
+                      ? '包场免费上机'
+                      : '计时中'
+                    : '未上机'
+                }}
+              </div>
               <p v-if="current">
                 区域：{{ current.area_name || '默认区域' }}；开始于
                 {{ format(current.started_at) }}
@@ -108,14 +128,20 @@
                 分钟
               </p>
               <h3>当前费用：¥{{ Number(quote.amount_due || 0).toFixed(2) }}</h3>
-              <p>换区不结账，各区费用累计后统一结算。</p>
+              <p v-if="current.booking_id">
+                包场免费上机至
+                {{ format(current.free_until) }}，到时自动结束，不扣余额或次卡。
+              </p>
+              <p v-else>换区不结账，各区费用累计后统一结算。</p>
               <el-select v-model="selectedArea" placeholder="选择要切换的区域">
                 <el-option
                   v-for="a in areaChoices"
                   :key="a.id"
                   :value="a.id"
                   :label="a.name"
-                  :disabled="a.id === current.area_id"
+                  :disabled="
+                    a.id === current.area_id || (a.booking && a.booking.blocked)
+                  "
                 />
               </el-select>
               <el-button
@@ -124,21 +150,35 @@
                   !selectedArea ||
                   selectedArea === current.area_id ||
                   accessWaiting ||
+                  (selectedAreaInfo &&
+                    selectedAreaInfo.booking &&
+                    selectedAreaInfo.booking.blocked) ||
                   selectedStore !== current.store_id
                 "
                 @click="switchMine"
                 >切换区域</el-button
               >
+              <el-alert
+                v-if="
+                  selectedAreaInfo &&
+                  selectedAreaInfo.booking &&
+                  selectedAreaInfo.booking.message
+                "
+                :title="selectedAreaInfo.booking.message"
+                :type="selectedAreaInfo.booking.blocked ? 'warning' : 'success'"
+                :closable="false"
+              />
+              <pricing-summary
+                v-if="
+                  selectedAreaInfo &&
+                  !(selectedAreaInfo.booking && selectedAreaInfo.booking.free)
+                "
+                :pricing="selectedAreaInfo.pricing"
+              />
               <p v-if="selectedAreaInfo">
-                新区工作日日间 ¥{{
-                  selectedAreaInfo.pricing.workday_day_hourly
-                }}/小时，夜间 ¥{{
-                  selectedAreaInfo.pricing.workday_night_hourly
-                }}/小时。{{
+                {{
                   selectedAreaInfo.auto_issue
-                    ? '门锁：' +
-                      selectedAreaInfo.lock_name +
-                      '；发码成功后切换计时。'
+                    ? '发码成功后切换计时。'
                     : '此区域不自动发码。'
                 }}
               </p>
@@ -167,7 +207,9 @@
                 type="primary"
                 :disabled="accessWaiting"
                 @click="checkoutMine"
-                >余额/次卡结账</el-button
+                >{{
+                  current.booking_id ? '结束免费上机' : '余额/次卡结账'
+                }}</el-button
               ></template
             ><template v-else
               ><el-select v-model="selectedStore" placeholder="选择门店"
@@ -184,16 +226,29 @@
                   :label="a.name"
                   :value="a.id"
               /></el-select>
+              <el-alert
+                v-if="
+                  selectedAreaInfo &&
+                  selectedAreaInfo.booking &&
+                  selectedAreaInfo.booking.message
+                "
+                :title="selectedAreaInfo.booking.message"
+                :type="selectedAreaInfo.booking.blocked ? 'warning' : 'success'"
+                :closable="false"
+              />
+              <pricing-summary
+                v-if="
+                  selectedAreaInfo &&
+                  !(selectedAreaInfo.booking && selectedAreaInfo.booking.free)
+                "
+                :pricing="selectedAreaInfo.pricing"
+              />
               <p v-if="selectedAreaInfo">
-                工作日日间 ¥{{
-                  selectedAreaInfo.pricing.workday_day_hourly
-                }}/小时，夜间 ¥{{
-                  selectedAreaInfo.pricing.workday_night_hourly
-                }}/小时。{{
+                {{
                   selectedAreaInfo.auto_issue
                     ? '入场门锁：' +
                       selectedAreaInfo.lock_name +
-                      '；密码确认成功后开始计费。'
+                      '；发码成功后开始计费。'
                     : '此区域不自动发码。'
                 }}
               </p>
@@ -201,13 +256,48 @@
                 type="primary"
                 :loading="starting"
                 :disabled="
-                  !selectedStore || !selectedArea || !!accessPending || starting
+                  !selectedStore ||
+                  !selectedArea ||
+                  !!accessPending ||
+                  starting ||
+                  (selectedAreaInfo &&
+                    selectedAreaInfo.booking &&
+                    selectedAreaInfo.booking.blocked)
                 "
                 @click="startMine"
-                >开始计时</el-button
+                >{{
+                  selectedAreaInfo &&
+                  selectedAreaInfo.booking &&
+                  selectedAreaInfo.booking.free
+                    ? '包场免费上机'
+                    : '开始计时'
+                }}</el-button
               ></template
             ></el-card
           >
+        </section>
+        <section v-if="active === 'bookings'">
+          <div class="toolbar">
+            <h2>包场</h2>
+            <el-select v-model="selectedStore" placeholder="选择门店"
+              ><el-option
+                v-for="s in stores"
+                :key="s.id"
+                :value="s.id"
+                :label="s.name"
+            /></el-select>
+          </div>
+          <member-bookings
+            v-if="selectedStore && profile.id"
+            :key="selectedStore"
+            :store-id="selectedStore"
+            :user-id="profile.id"
+            @go-home="
+              active = 'home'
+              refreshAdmission()
+            "
+            @changed="refreshAdmission"
+          />
         </section>
         <section v-if="active === 'profile'">
           <el-card class="panel"
@@ -259,12 +349,16 @@
             /></el-select>
           </div>
           <access-management
+            ref="accessManagement"
+            @pricing-updated="pricingUpdated"
             v-if="selectedStore && can('stores.manage')"
             :key="selectedStore"
             :store-id="selectedStore"
           />
           <el-tabs
             v-if="selectedStore"
+            ref="storeManagementTabs"
+            class="store-management-tabs"
             v-model="storeTab"
             @tab-click="loadStoreTab"
           >
@@ -287,10 +381,26 @@
                   ><div class="muted">累计营收</div>
                   <div class="metric">
                     ¥{{ Number(report.revenue || 0).toFixed(2) }}
+                  </div>
+                  <div class="muted">
+                    含包场净收款 ¥{{
+                      Number(report.booking_revenue || 0).toFixed(2)
+                    }}
                   </div></el-card
                 >
               </div></el-tab-pane
             >
+            <el-tab-pane
+              v-if="can('store.consumptions.manage')"
+              label="包场"
+              name="bookings"
+            >
+              <booking-management
+                v-if="storeTab === 'bookings'"
+                :key="selectedStore"
+                :store-id="selectedStore"
+              />
+            </el-tab-pane>
             <el-tab-pane label="会员" name="members"
               ><div class="toolbar">
                 <el-select v-model="newMember" filterable placeholder="选择用户"
@@ -345,20 +455,37 @@
                 ></el-table
               ></el-tab-pane
             >
-            <el-tab-pane label="定价" name="pricing"
-              ><el-form label-width="150px" class="grid"
-                ><el-form-item
-                  v-for="p in priceFields"
-                  :key="p.key"
-                  :label="p.label"
-                  ><el-input-number
-                    v-model="pricing[p.key]"
-                    :min="0"
-                    :precision="2" /></el-form-item></el-form
-              ><el-button type="primary" @click="savePricing"
-                >保存定价</el-button
-              ></el-tab-pane
-            >
+            <el-tab-pane label="定价" name="pricing">
+              <el-alert
+                v-if="pricingError"
+                :title="pricingError"
+                type="info"
+                :closable="false"
+              />
+              <template v-else-if="!pricingLoading">
+                <pricing-editor ref="storePricingEditor" v-model="pricing" />
+                <div class="pricing-save-panel">
+                  <div>
+                    <strong>保存计费规则</strong>
+                    <p class="muted">
+                      包含每日时段与特殊日期。保存后用于新计费段。
+                    </p>
+                  </div>
+                  <el-button
+                    type="primary"
+                    :loading="pricingSaving"
+                    @click="savePricing"
+                    >保存计费规则</el-button
+                  >
+                </div>
+              </template>
+              <p v-else>正在加载计费规则…</p>
+              <booking-pricing
+                v-if="storeTab === 'pricing' && can('store.pricing.manage')"
+                :key="selectedStore"
+                :store-id="selectedStore"
+              />
+            </el-tab-pane>
             <el-tab-pane label="消费记录" name="consumptions"
               ><el-table :data="consumptions"
                 ><el-table-column
@@ -508,6 +635,9 @@ const labels = {
   'System administrator': '系统管理员',
   'Store member': '门店会员',
   consume: '消费扣款',
+  booking_deposit: '包场订金',
+  booking_refund: '包场退款',
+  booking: '包场免费',
   admin: '管理员',
   member: '会员',
   manager: '店长',
@@ -525,24 +655,20 @@ const labels = {
   'store.reports.view': '查看报表',
 }
 const RegistrationStats = () => import('./RegistrationStats.vue')
-const prices = [
-  ['workday_day_hourly', '工作日日间小时价'],
-  ['workday_day_cap', '工作日日间封顶'],
-  ['workday_night_hourly', '工作日夜间小时价'],
-  ['workday_night_cap', '工作日夜间封顶'],
-  ['weekend_day_hourly', '周末日间小时价'],
-  ['weekend_day_cap', '周末日间封顶'],
-  ['weekend_night_hourly', '周末夜间小时价'],
-  ['weekend_night_cap', '周末夜间封顶'],
-  ['holiday_day_hourly', '节假日日间小时价'],
-  ['holiday_day_cap', '节假日日间封顶'],
-  ['holiday_night_hourly', '节假日夜间小时价'],
-  ['holiday_night_cap', '节假日夜间封顶'],
-]
+import PricingEditor from '../components/PricingEditor.vue'
+import PricingSummary from '../components/PricingSummary.vue'
+import { createPricing } from '../pricing-rules'
+import { displayTime } from '../booking-utils'
 export default {
   name: 'DashboardView',
   components: {
     RegistrationStats,
+    PricingEditor,
+    PricingSummary,
+    BookingManagement: () => import('../components/BookingManagement.vue'),
+    BookingPricing: () => import('../components/BookingPricing.vue'),
+    MemberBookings: () => import('../components/MemberBookings.vue'),
+    VenueStatus: () => import('../components/VenueStatus.vue'),
     AccessManagement: () => import('../components/AccessManagement.vue'),
   },
   data: () => ({
@@ -567,12 +693,28 @@ export default {
     users: [],
     roles: [],
     newMember: null,
-    pricing: {},
+    pricing: createPricing(),
+    pricingLoading: false,
+    pricingSaving: false,
+    pricingError: '',
     consumptions: [],
     ledgers: [],
-    priceFields: prices.map((x) => ({ key: x[0], label: x[1] })),
   }),
   watch: {
+    storeTab() {
+      this.$nextTick(() => {
+        if (!window.matchMedia('(max-width: 760px)').matches) return
+        const root = this.$refs.storeManagementTabs?.$el
+        const nav = root?.querySelector('.el-tabs__nav-scroll')
+        const tab = nav?.querySelector('.el-tabs__item.is-active')
+        if (!nav || !tab) return
+        const frame = nav.getBoundingClientRect()
+        const item = tab.getBoundingClientRect()
+        if (item.left < frame.left || item.right > frame.right)
+          nav.scrollLeft +=
+            item.left - frame.left - (frame.width - item.width) / 2
+      })
+    },
     active(value) {
       if (value === 'home') this.loadCurrent().catch(this.error)
     },
@@ -598,8 +740,10 @@ export default {
     menus() {
       const items = [
         { key: 'home', label: '首页', icon: 'el-icon-house' },
+        { key: 'venue', label: '场况', icon: 'el-icon-monitor' },
         { key: 'profile', label: '个人资料', icon: 'el-icon-user' },
         { key: 'stores', label: '我的门店', icon: 'el-icon-office-building' },
+        { key: 'bookings', label: '包场', icon: 'el-icon-date' },
       ]
       if (
         this.permissions.some(
@@ -632,6 +776,7 @@ export default {
     await this.bootstrap()
     this.accessTimer = setInterval(() => {
       if (this.accessWaiting) this.loadCurrent().catch(this.error)
+      else if (this.active === 'home') this.refreshAdmission().catch(this.error)
     }, 15000)
   },
   methods: {
@@ -654,7 +799,7 @@ export default {
       this.$message.error(e.response?.data?.detail || '操作失败')
     },
     format(v) {
-      return v ? new Date(v).toLocaleString() : '-'
+      return displayTime(v)
     },
     async bootstrap() {
       try {
@@ -690,6 +835,14 @@ export default {
       } catch (e) {
         this.error(e)
       }
+    },
+    async refreshAdmission() {
+      const storeId = this.selectedStore
+      if (storeId) {
+        const { data } = await this.$api.get(`/me/stores/${storeId}/areas`)
+        if (storeId === this.selectedStore) this.areaChoices = data
+      }
+      await this.loadCurrent()
     },
     async resumeAccess() {
       try {
@@ -864,10 +1017,7 @@ export default {
           this.members = members.data
           this.users = candidates.data
         }
-        if (this.storeTab === 'pricing')
-          this.pricing = (
-            await this.$api.get(`/stores/${this.selectedStore}/pricing`)
-          ).data
+        if (this.storeTab === 'pricing') await this.loadPricing()
         if (this.storeTab === 'consumptions')
           this.consumptions = (
             await this.$api.get(`/stores/${this.selectedStore}/consumptions`)
@@ -1006,15 +1156,44 @@ export default {
         this.error(e)
       }
     },
-    async savePricing() {
+    async loadPricing() {
+      const storeId = this.selectedStore
+      this.pricingLoading = true
+      this.pricingError = ''
       try {
-        await this.$api.put(
-          `/stores/${this.selectedStore}/pricing`,
+        const { data } = await this.$api.get(`/stores/${storeId}/pricing`)
+        if (storeId === this.selectedStore) this.pricing = data
+      } catch (e) {
+        if (storeId === this.selectedStore)
+          this.pricingError =
+            e.response?.data?.detail || '计费规则加载失败，请重新选择门店'
+      } finally {
+        if (storeId === this.selectedStore) this.pricingLoading = false
+      }
+    },
+    async pricingUpdated() {
+      await this.loadAreas()
+      if (this.storeTab === 'pricing') await this.loadPricing()
+    },
+    async savePricing() {
+      if (!this.$refs.storePricingEditor.validate()) return
+      const storeId = this.selectedStore
+      this.pricingSaving = true
+      try {
+        const { data } = await this.$api.put(
+          `/stores/${storeId}/pricing`,
           this.pricing
         )
+        if (storeId !== this.selectedStore) return
+        this.pricing = data
         this.$message.success('定价已保存')
+        await this.loadAreas()
+        if (this.$refs.accessManagement)
+          await this.$refs.accessManagement.load()
       } catch (e) {
         this.error(e)
+      } finally {
+        this.pricingSaving = false
       }
     },
     async managerCheckout(row) {

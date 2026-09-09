@@ -39,6 +39,10 @@ def default_area(db, store_id):
     values = {f"{d}_{p}_{r}_cents": getattr(price, f"{d}_{p}_{r}_cents",
         800 if r == "hourly" else 4000) for d in ("workday","weekend","holiday")
         for p in ("day","night") for r in ("hourly","cap")}
+    from .pricing import public_pricing, validate_pricing
+    rules = public_pricing(values)
+    rules["timezone_offset_minutes"] = 480
+    values = validate_pricing(rules)
     row = BillingArea(store_id=store_id, name="默认区域", enabled=True, auto_issue=False,
                       pricing_json=json.dumps(values))
     db.add(row)
@@ -79,10 +83,14 @@ def finalize(db, request):
     if not request.pricing_json:
         raise HTTPException(409, "发码申请缺少区域价格，请联系店长核对")
     now = datetime.utcnow()
+    from .bookings import guard_entry, check_reserved_admission, attach_session
+    booking = guard_entry(db, request.store_id, request.area_id, user_id=request.recipient_id)
+    check_reserved_admission(request, booking)
     row = Consumption(store_id=request.store_id, user_id=request.recipient_id,
         started_at=now, ended_at=now, operator_id=request.operator_id)
     db.add(row)
     db.flush()
+    attach_session(db, row.id, booking)
     return row.id
 
 
@@ -103,6 +111,12 @@ def resume(db, request_id):
 
 def begin(db, *, store_id, user_id, operator_id, area_id, key, started_at, secure):
     required_schema(db)
+    if started_at and started_at.tzinfo is not None:
+        from .bookings import utc
+        started_at = utc(started_at)
+    from .bookings import lock_store, guard_entry, expire_sessions, attach_session, admission_pricing
+    lock_store(db, store_id)
+    expire_sessions(db, user_id=user_id)
     # 写锁统一串行化普通上机和结账；外部请求前必须结束事务。
     db.execute(update(User).where(User.id == user_id).values(id=user_id))
     active_member(db, store_id, user_id)
@@ -124,13 +138,16 @@ def begin(db, *, store_id, user_id, operator_id, area_id, key, started_at, secur
     if occupied or opened:
         raise HTTPException(409, "已有进行中或待确认记录；同店请使用换区入口，跨店需先结账")
     area = resolve_area(db, store_id, area_id)
-    area_id, prices = area.id, area.pricing_json
+    area_id = area.id
+    booking = guard_entry(db, store_id, area_id, started_at, user_id=user_id)
+    prices = admission_pricing(area.pricing_json, booking)
     if not area.auto_issue:
-        when = started_at or datetime.utcnow()
+        when = datetime.utcnow() if booking else started_at or datetime.utcnow()
         row = Consumption(store_id=store_id, user_id=user_id, started_at=when,
                           ended_at=when, operator_id=operator_id)
         db.add(row)
         db.flush()
+        attach_session(db, row.id, booking)
         db.add(ConsumptionArea(consumption_id=row.id, area_id=area_id, pricing_json=prices))
         db.add(MemberOccupancy(user_id=user_id, area_id=area_id, consumption_id=row.id))
         if key:

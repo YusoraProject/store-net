@@ -91,21 +91,6 @@ class MemberOut(BaseModel):
     times_count: int
 
 
-class PricingIn(BaseModel):
-    workday_day_hourly: float = 8
-    workday_day_cap: float = 40
-    workday_night_hourly: float = 8
-    workday_night_cap: float = 40
-    weekend_day_hourly: float = 8
-    weekend_day_cap: float = 40
-    weekend_night_hourly: float = 8
-    weekend_night_cap: float = 40
-    holiday_day_hourly: float = 8
-    holiday_day_cap: float = 40
-    holiday_night_hourly: float = 8
-    holiday_night_cap: float = 40
-
-
 class BenefitChange(BaseModel):
     paid_delta: float = 0
     bonus_delta: float = 0
@@ -140,6 +125,8 @@ class CheckoutIn(QuoteIn):
 
 class ConsumptionOut(BaseModel):
     id: int
+    booking_id: Optional[int] = None
+    free_until: Optional[datetime] = None
     segments: list[dict] = Field(default_factory=list)
     area_id: Optional[int] = None
     area_name: Optional[str] = None

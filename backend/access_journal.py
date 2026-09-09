@@ -30,6 +30,12 @@ def reserve(session_factory, *, store_id, area_id, operator_id, recipient_id,
     if not idempotency_key or len(idempotency_key) > 80:
         raise LockError("发码请求标识无效")
     with session_factory() as db:
+        if source == "automatic":
+            from .bookings import lock_store, guard_entry, check_reserved_admission
+            from types import SimpleNamespace
+            lock_store(db, store_id)
+            booking = guard_entry(db, store_id, area_id, user_id=recipient_id)
+            check_reserved_admission(SimpleNamespace(pricing_json=pricing_json), booking)
         locked = db.execute(update(LockCredential).where(
             LockCredential.store_id == store_id,
             LockCredential.version == credential_version,

@@ -276,7 +276,7 @@
     <el-dialog
       title="计费区域"
       :visible.sync="visible"
-      width="min(680px, 94vw)"
+      width="min(960px, 94vw)"
       append-to-body
     >
       <el-alert
@@ -295,14 +295,8 @@
         <el-form-item label="启用"
           ><el-switch v-model="form.enabled"
         /></el-form-item>
-        <el-form-item v-for="p in priceFields" :key="p.key" :label="p.label"
-          ><el-input-number
-            v-model="form.pricing[p.key]"
-            :min="0"
-            :max="100000"
-            :precision="2"
-        /></el-form-item>
       </el-form>
+      <pricing-editor ref="pricingEditor" v-model="form.pricing" />
       <span slot="footer"
         ><el-button @click="visible = false">取消</el-button
         ><el-button type="primary" :loading="saving" @click="save"
@@ -313,35 +307,16 @@
   </el-card>
 </template>
 <script>
-const priceFields = []
-for (const [day, d] of [
-  ['workday', '工作日'],
-  ['weekend', '周末'],
-  ['holiday', '节假日'],
-]) {
-  for (const [period, p] of [
-    ['day', '日间'],
-    ['night', '夜间'],
-  ]) {
-    for (const [rate, r] of [
-      ['hourly', '每小时'],
-      ['cap', '封顶价'],
-    ])
-      priceFields.push({
-        key: day + '_' + period + '_' + rate,
-        label: d + p + r,
-      })
-  }
-}
+import PricingEditor from './PricingEditor.vue'
+import { createPricing } from '../pricing-rules'
 const fresh = () => ({
   name: '',
   enabled: true,
-  pricing: Object.fromEntries(
-    priceFields.map((p) => [p.key, p.key.endsWith('hourly') ? 8 : 40])
-  ),
+  pricing: createPricing(),
 })
 export default {
   name: 'AccessManagement',
+  components: { PricingEditor },
   props: { storeId: { type: Number, required: true } },
   data: () => ({
     auth: {
@@ -364,7 +339,6 @@ export default {
     page: 1,
     records: { items: [], total: 0 },
     filter: { area_id: null, status: null },
-    priceFields,
     states: {
       pending: '等待处理',
       issuing: '正在发码',
@@ -589,6 +563,7 @@ export default {
       this.visible = true
     },
     async save() {
+      if (!this.$refs.pricingEditor.validate()) return
       this.saving = true
       try {
         const base = '/access/stores/' + this.storeId + '/areas'
@@ -603,6 +578,7 @@ export default {
         else await this.$api.post(base, payload)
         this.visible = false
         this.$message.success('区域已保存')
+        this.$emit('pricing-updated')
         await this.load()
       } catch (e) {
         this.$message.error(this.message(e))

@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from .models import User, Consumption
 from .access_models import (ConsumptionArea, ConsumptionSegment, MemberOccupancy,
     SwitchReceipt, PasscodeRequest, LockCredential)
-from .billing import segments, day_kind, quote_cents
+from .billing import charge_parts, quote_cents
 from .access_credentials import valid_client, secret_box
 from .access_journal import process
 
@@ -47,6 +47,9 @@ def change_segment(db, row, area_id, prices, when):
 
 
 def finalize_switch(db, request):
+    from .bookings import guard_entry, guard_session_switch, check_reserved_admission
+    booking = guard_entry(db, request.store_id, request.area_id, user_id=request.recipient_id)
+    check_reserved_admission(request, booking)
     db.execute(update(User).where(User.id == request.recipient_id).values(id=request.recipient_id))
     row = db.scalar(select(Consumption).where(Consumption.id == request.target_consumption_id)
                     .with_for_update().execution_options(populate_existing=True))
@@ -57,6 +60,7 @@ def finalize_switch(db, request):
         raise HTTPException(409, "换区消费状态已变化，请联系店长核对")
     if int(request.end_ms) <= int(time.time() * 1000):
         raise HTTPException(409, "新区域密码已经过期，继续按原区域计费")
+    guard_session_switch(db, row, booking)
     # 远端确认之前的时间全部留在原区；只有本地事务成功才切到新区。
     change_segment(db, row, request.area_id, request.pricing_json, datetime.utcnow())
     occupied.pending_request_id = None
@@ -67,6 +71,11 @@ def finalize_switch(db, request):
 def switch(db, *, consumption_id, user_id, operator_id, area_id, key, secure):
     from .area_billing import required_schema, active_member, resolve_area, finalize
     required_schema(db)
+    from .bookings import lock_store, guard_entry, guard_session_switch, admission_pricing
+    initial = db.get(Consumption, consumption_id)
+    if not initial or initial.user_id != user_id:
+        raise HTTPException(404, "消费记录不存在")
+    lock_store(db, initial.store_id)
     db.execute(update(User).where(User.id == user_id).values(id=user_id))
     row = db.scalar(select(Consumption).where(Consumption.id == consumption_id)
         .with_for_update().execution_options(populate_existing=True))
@@ -92,10 +101,13 @@ def switch(db, *, consumption_id, user_id, operator_id, area_id, key, secure):
     if not occupied or occupied.consumption_id != row.id:
         raise HTTPException(409, "上机占用记录不一致，请联系店长处理")
     area = resolve_area(db, row.store_id, area_id)
+    booking = guard_entry(db, row.store_id, area.id, user_id=user_id)
+    guard_session_switch(db, row, booking)
+    prices = admission_pricing(area.pricing_json, booking)
     if area.id == occupied.area_id:
         raise HTTPException(409, "已经在该区域，无需重复切换")
     if not area.auto_issue:
-        change_segment(db, row, area.id, area.pricing_json, datetime.utcnow())
+        change_segment(db, row, area.id, prices, datetime.utcnow())
         occupied.request_id = None
         db.add(SwitchReceipt(operator_id=operator_id, request_key=key,
                             consumption_id=row.id, area_id=area.id))
@@ -112,7 +124,7 @@ def switch(db, *, consumption_id, user_id, operator_id, area_id, key, secure):
         raise HTTPException(409, "门锁授权已变化，请刷新后重试")
     request_id = str(uuid.uuid4())
     start_ms = int(time.time() // 3600) * 3600000
-    db.add(PasscodeRequest(id=request_id, pricing_json=area.pricing_json, store_id=row.store_id,
+    db.add(PasscodeRequest(id=request_id, pricing_json=prices, store_id=row.store_id,
         area_id=area.id, operator_id=operator_id, recipient_id=user_id, idempotency_key=key,
         remote_name="net-" + uuid.uuid4().hex, source="switch", status="pending",
         lock_id=area.lock_id, credential_version=version, password_version=area.password_version,
@@ -138,15 +150,15 @@ def quote_accumulated(db, row, fallback, ended, forced_day="auto"):
     totals, caps = {}, {}
     for visit in visits:
         price = json.loads(visit.pricing_json)
-        price_key = json.dumps(price, sort_keys=True)
-        for left, right in segments(visit.started_at, min(visit.ended_at or ended, ended)):
-            period = "day" if 8 <= left.hour < 18 else "night"
-            kind = day_kind(left, forced_day)
+        from .pricing import public_pricing, validate_pricing
+        # 旧规则只转换存储格式、有效价格不变时，继续共享原来的封顶。
+        canonical = validate_pricing(public_pricing(price, current=False), preserve_clock=True) if price.get("version") != 2 and forced_day == "auto" else price
+        price_key = json.dumps(canonical, sort_keys=True)
+        for bucket, amount, cap in charge_parts(price, visit.started_at, min(visit.ended_at or ended, ended), forced_day):
             # 重返同区不重置同一天同一时段的封顶；不同价格快照分别计算。
-            key = (visit.area_id, price_key, left.date(), period)
-            minutes = math.ceil((right - left).total_seconds() / 60)
-            totals[key] = totals.get(key, 0) + math.ceil(price[f"{kind}_{period}_hourly_cents"] * minutes / 60)
-            caps[key] = price[f"{kind}_{period}_cap_cents"]
+            key = (visit.area_id, price_key, *bucket)
+            totals[key] = totals.get(key, 0) + amount
+            caps[key] = cap
     due = sum(min(value, caps[key]) if caps[key] > 0 else value for key, value in totals.items())
     return max(1, math.ceil((ended - row.started_at).total_seconds() / 60)), due
 

@@ -19,6 +19,8 @@ jobs:
         run: pip install -r backend/requirements.txt
       - name: 后端语法检查
         run: python -m compileall -q backend
+      - name: 计费与包场测试
+        run: python -m unittest discover -s backend/tests -v
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

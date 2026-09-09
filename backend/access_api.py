@@ -8,7 +8,6 @@ import time
 import threading
 from collections import defaultdict, deque
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, Request
 from fastapi.routing import APIRoute
@@ -86,33 +85,21 @@ class CancelInput(BaseModel):
 class AreaInput(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     enabled: bool = True
-    pricing: dict[str, float]
+    pricing: dict
     auto_issue: bool = False
 
 
 def validate_prices(values, cents):
-    keys = {f"{day}_{period}_{kind}" for day in ("workday", "weekend", "holiday")
-            for period in ("day", "night") for kind in ("hourly", "cap")}
-    if set(values) != keys:
-        raise HTTPException(422, "请完整填写工作日、周末、节假日的日间及夜间价格")
-    result = {}
-    for key, value in values.items():
-        try:
-            amount = Decimal(str(value))
-            if not amount.is_finite() or amount < 0 or amount > 100000:
-                raise ValueError()
-            if amount.quantize(Decimal("0.01")) != amount:
-                raise ValueError()
-        except (InvalidOperation, ValueError):
-            raise HTTPException(422, "价格必须为0至100000之间、最多两位小数的金额") from None
-        result[key + ("_cents" if cents else "")] = int(amount * 100) if cents else float(amount)
-    return result
+    from .pricing import validate_pricing
+    try:
+        return validate_pricing(values, cents)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
 
 
 def public_area(row, cents):
-    prices = json.loads(row.pricing_json)
-    if cents:
-        prices = {key.removesuffix("_cents"): value / 100 for key, value in prices.items()}
+    from .pricing import public_pricing
+    prices = public_pricing(json.loads(row.pricing_json), cents)
     return dict(id=row.id, store_id=row.store_id, name=row.name, enabled=row.enabled,
                 pricing=prices, lock_id=row.lock_id, lock_name=row.lock_name,
                 auto_issue=row.auto_issue)

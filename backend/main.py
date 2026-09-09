@@ -5,7 +5,7 @@ import threading
 import time
 import uuid
 from collections import defaultdict, deque
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
@@ -144,6 +144,8 @@ def member_out(db: Session, row: StoreMember) -> MemberOut:
 def consumption_out(row: Consumption) -> ConsumptionOut:
     from sqlalchemy.orm import object_session
     db = object_session(row)
+    from .models import BookingSession
+    booking_session = db.get(BookingSession, row.id) if db else None
     link = db.get(ConsumptionArea, row.id) if db else None
     area = db.get(BillingArea, link.area_id) if link else None
     visits = db.scalars(select(ConsumptionSegment).where(ConsumptionSegment.consumption_id == row.id)
@@ -151,7 +153,8 @@ def consumption_out(row: Consumption) -> ConsumptionOut:
     history = [{"area_id": v.area_id, "area_name": db.get(BillingArea, v.area_id).name,
                 "started_at": v.started_at, "ended_at": v.ended_at} for v in visits]
     return ConsumptionOut(id=row.id, area_id=link.area_id if link else None, area_name=area.name if area else None,
-                          segments=history,
+                          segments=history, booking_id=booking_session.booking_id if booking_session else None,
+                          free_until=booking_session.ends_at.replace(tzinfo=timezone.utc) if booking_session else None,
                           store_id=row.store_id, user_id=row.user_id, started_at=row.started_at,
                           ended_at=row.ended_at, duration_minutes=row.duration_minutes,
                           amount_due=cents_to_money(row.amount_due_cents), amount_paid=cents_to_money(row.paid_cents),
@@ -393,29 +396,36 @@ def change_member(store_id: int, user_id: int, payload: MemberUpdate, db: Sessio
     row.updated_at = datetime.utcnow(); db.commit(); db.refresh(row); return member_out(db, row)
 
 
-@app.get("/api/v1/stores/{store_id}/pricing", response_model=PricingIn)
+@app.get("/api/v1/stores/{store_id}/pricing")
 def get_store_pricing(store_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     membership(db, store_id, user.id)
     rows = area_billing.default_area(db, store_id)
     if len(rows) != 1:
         raise HTTPException(409, "门店有多个区域，请到计费区域分别查看价格")
-    result = PricingIn(**{k.removesuffix("_cents"): v/100 for k,v in json.loads(rows[0].pricing_json).items()})
+    from .pricing import public_pricing
+    result = public_pricing(json.loads(rows[0].pricing_json))
     db.commit()
     return result
 
 
-@app.put("/api/v1/stores/{store_id}/pricing", response_model=PricingIn)
-def set_store_pricing(store_id: int, payload: PricingIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
+@app.put("/api/v1/stores/{store_id}/pricing")
+def set_store_pricing(store_id: int, payload: dict, db: Session = Depends(get_db), user: User = Depends(current_user)):
     assert_store_scope(db, user, store_id, "store.pricing.manage"); row = get_pricing(db, store_id)
     areas = area_billing.default_area(db, store_id)
     if len(areas) != 1:
         raise HTTPException(409, "门店有多个区域，请到计费区域分别修改价格")
-    for name in PRICE_NAMES:
-        value = getattr(payload, name)
-        if value < 0: raise HTTPException(400, "价格不能为负数")
-        setattr(row, name + "_cents", money_to_cents(value))
-    areas[0].pricing_json = json.dumps({name + "_cents": getattr(row, name + "_cents") for name in PRICE_NAMES})
-    row.updated_at = datetime.utcnow(); db.commit(); return pricing_payload(row)
+    from .access_api import validate_prices
+    from .pricing import public_pricing
+    prices = validate_prices(payload, True)
+    areas[0].pricing_json = json.dumps(prices)
+    # 旧列仅保留兼容用途；新计费始终使用区域规则及消费快照。
+    if prices.get("version") != 2:
+        for name in PRICE_NAMES:
+            setattr(row, name + "_cents", prices[name + "_cents"])
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    return public_pricing(prices)
+
 
 
 @app.post("/api/v1/stores/{store_id}/benefits/{user_id}", response_model=MemberOut)
@@ -481,12 +491,20 @@ def start_mine(payload: StartIn, request: Request, db: Session = Depends(get_db)
 
 @app.get("/api/v1/me/consumption/current", response_model=ConsumptionOut | None)
 def current_mine(db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .bookings import expire_sessions
+    if expire_sessions(db, user_id=user.id):
+        db.commit()
     row = open_consumption(db, user.id); return consumption_out(row) if row else None
 
 
 def quote_row(db: Session, row: Consumption, payload: QuoteIn) -> tuple[datetime, int, int]:
     # 报价和结账共用计算入口，避免页面预览与最终扣款采用不同规则。
     ended = payload.ended_at or datetime.utcnow()
+    from .models import BookingSession
+    from .bookings import free_quote
+    free = db.get(BookingSession, row.id)
+    if free:
+        return free_quote(row, free, ended)
     try: minutes, due = area_switching.quote_accumulated(db, row, get_pricing(db, row.store_id), ended, payload.day_type)
     except ValueError as exc: raise HTTPException(400, str(exc)) from exc
     return ended, minutes, due
@@ -512,6 +530,15 @@ def checkout(db: Session, row: Consumption, payload: CheckoutIn, actor: User, se
         if existing.id != row.id: raise HTTPException(409, "结账请求标识已用于其他消费")
         return existing
     if row.status != "open": raise HTTPException(409, "该消费记录已经结账")
+    from .models import BookingSession
+    from .bookings import finish_free
+    free = db.get(BookingSession, row.id)
+    if free:
+        finish_free(db, row, free, ended=None if self_service else payload.ended_at,
+                    key=payload.idempotency_key, operator_id=actor.id)
+        db.commit()
+        db.refresh(row)
+        return row
     area_switching.guard_pending(db, row.user_id)
     if self_service:
         payload = payload.model_copy(update={"ended_at": None, "day_type": "auto"})
@@ -593,7 +620,11 @@ def report(store_id: int, db: Session = Depends(get_db), user: User = Depends(cu
     active = db.scalar(select(func.count()).select_from(Consumption).where(Consumption.store_id == store_id, Consumption.status == "open"))
     members_count = db.scalar(select(func.count()).select_from(StoreMember).where(StoreMember.store_id == store_id, StoreMember.is_active == True))  # noqa: E712
     revenue = db.scalar(select(func.coalesce(func.sum(Consumption.paid_cents), 0)).where(Consumption.store_id == store_id, Consumption.status == "paid"))
-    return {"active_sessions": active, "members": members_count, "revenue": cents_to_money(revenue)}
+    from .bookings import net_revenue
+    booking_revenue = net_revenue(db, store_id)
+    return {"active_sessions": active, "members": members_count,
+            "revenue": cents_to_money(revenue + booking_revenue),
+            "booking_revenue": cents_to_money(booking_revenue)}
 
 
 from .access_api import make_router as make_access_router
@@ -605,6 +636,12 @@ def access_scope(db, user, store_id):
 
 app.include_router(make_access_router(user_dependency=current_user, db_dependency=get_db,
                                       scope=access_scope, cents=True), prefix="/api/v1")
+
+from .bookings import make_router as make_booking_router
+
+app.include_router(make_booking_router(user_dependency=current_user, db_dependency=get_db,
+    scope=lambda db, user, store_id: assert_store_scope(db, user, store_id, "store.consumptions.manage"),
+    pricing_scope=lambda db, user, store_id: assert_store_scope(db, user, store_id, "store.pricing.manage")), prefix="/api/v1")
 
 @app.exception_handler(LockError)
 async def lock_error(request: Request, exc: LockError):
@@ -632,9 +669,16 @@ def member_areas(store_id: int, db: Session = Depends(get_db), user: User = Depe
     db.execute(update(Store).where(Store.id == store_id).values(id=store_id))
     rows = area_billing.default_area(db, store_id)
     from .access_api import public_area
-    result = [public_area(r, True) for r in rows if r.enabled]
+    from .bookings import entry_status
+    result = [{**public_area(r, True), "booking": entry_status(db, store_id, r.id, user.id)} for r in rows if r.enabled]
     db.commit()
     return result
+
+
+@app.get("/api/v1/stores/{store_id}/venue-status")
+def venue_status(store_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    from .venue_status import snapshot
+    return JSONResponse(content=snapshot(db, store_id, user), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/v1/me/consumption/access")

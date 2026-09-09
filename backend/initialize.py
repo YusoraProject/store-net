@@ -1,4 +1,4 @@
-"""首次启动创建空库；后续启动只检查结构、补齐初始账号，不修改已有表。"""
+"""首次创建空库；已有库验证原表后仅补包场相关表，不改动原表和记录。"""
 import json
 from pathlib import Path
 
@@ -22,7 +22,7 @@ def current_metadata():
 
 
 def prepare_schema(bind):
-    """只接受空库或结构一致的本项目数据库，拒绝把旧库当作空库升级。"""
+    """只允许已知的新增表；不兼容的既有表仍拒绝启动。"""
     if bind.dialect.name == "sqlite" and bind.url.database not in (None, "", ":memory:"):
         Path(bind.url.database).parent.mkdir(parents=True, exist_ok=True)
     metadata = current_metadata()
@@ -31,9 +31,13 @@ def prepare_schema(bind):
     if not existing:
         metadata.create_all(bind)
         return
-    incompatible = existing != set(metadata.tables)
+    missing = set(metadata.tables) - existing
+    additive = {"venue_bookings", "booking_settings", "booking_details", "booking_invitations", "booking_sessions"}
+    incompatible = bool(existing - set(metadata.tables) or missing - additive)
     if not incompatible:
         for name, table in metadata.tables.items():
+            if name not in existing:
+                continue
             columns = {column["name"] for column in inspector.get_columns(name)}
             primary_key = inspector.get_pk_constraint(name)["constrained_columns"]
             unique_sets = {tuple(value["column_names"]) for value in inspector.get_unique_constraints(name)}
@@ -48,6 +52,8 @@ def prepare_schema(bind):
     if incompatible:
         raise RuntimeError("数据库结构与当前项目不一致，已停止启动且未修改原数据。"
                            "本版本按首次运行准备，请将 DATABASE_URL 指向新的空数据库；不要删除旧库。")
+    if missing:
+        metadata.create_all(bind, tables=[table for table in metadata.sorted_tables if table.name in missing])
 
 
 def initialize_database(bind=engine, sessions=SessionLocal):
